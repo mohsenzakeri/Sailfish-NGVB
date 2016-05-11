@@ -1,0 +1,66 @@
+
+#include <boost/math/special_functions/digamma.hpp>
+#include <vector>
+	
+
+class NGVBMethod {
+	private:
+		size_t T,M,N;
+		double * alpha; // prior over expression
+		double * phiHat;
+		double * digA_pH;
+		double * phi_sm;
+		double * phi;
+		double boundConstant;
+		size_t* rowStart;
+	
+
+		bool converged;
+		bool error;
+
+		std::vector<double> beta;
+		std::vector<uint32_t> beta_col;
+		std::vector<uint32_t> classID;
+
+		std::vector<std::vector<uint32_t> > txpGroupLabels;
+		std::vector<std::vector<double> > txpGroupWeights;
+		std::vector<uint64_t> txpGroupCounts;
+
+		bool usedSteepest;
+		long iteration,i,r;
+		double boundOld,bound,squareNorm,squareNormOld,valBeta,valBetaDiv,natGrad_i,gradGamma_i,phiGradPhiSum_r;
+		double *gradPhi,*natGrad,*gradGamma,*searchDir,*tmpD,*phiOld;
+
+
+	public:
+		NGVBMethod(std::vector<uint32_t>& _transcripts,
+					std::vector<std::vector<uint32_t> >& _txpGroupLabels,
+					std::vector<std::vector<double> >& _txpGroupWeights,
+					std::vector<uint64_t>& _txpGroupCounts,
+					long seed = 0);
+		
+		void negGradient(double* res);
+		double getBound();
+		void unpack(double* vals,double* adds);
+		void softmaxInplace(double* val,double* res);
+		void sumCols(double* val, double* res) const;
+		double logSumExpVal(double* val, size_t st, size_t en) const;
+
+		void optimize(long maxIter,double ftol, double gtol);
+		void optimizationStep();
+		bool checkConvergance(double ftol, double gtol);
+		double* getAlphas();
+
+		double getConvVal();
+
+
+/*		void EMStep(
+	        std::vector<std::vector<uint32_t> >& txpGroupLabels,
+	        std::vector<std::vector<double> >& txpGroupWeights,
+	        std::vector<uint64_t>& txpGroupCounts,
+	        std::vector<double>& alphaIn,
+	        std::vector<double>& alphaOut);
+
+		void incLoop(std::vector<double>& val, double inc);
+*/
+};
