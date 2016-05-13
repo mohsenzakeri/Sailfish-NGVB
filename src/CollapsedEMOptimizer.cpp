@@ -763,6 +763,7 @@ bool CollapsedEMOptimizer::optimize(ReadExperiment& readExp,
                     // 1 / effLen of the corresponding transcript
                     double wsum{0.0};
                     for (size_t i = 0; i < classSize; ++i) {
+                        //kv.second.count = 1;
                         v.weights[i] = (kv.second.count / effLens(k.txps[i]));
                         wsum += v.weights[i];
                     }
@@ -872,7 +873,7 @@ bool CollapsedEMOptimizer::optimize(ReadExperiment& readExp,
             jointLog->info("iteration = {} | max rel diff. = {}",
                             itNum, maxRelDiff);
         }
-
+        std::cout<<"itNum "<<itNum<<"\n";
         ++itNum;
     }
 

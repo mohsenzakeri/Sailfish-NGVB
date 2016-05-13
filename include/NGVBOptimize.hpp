@@ -15,6 +15,7 @@ class NGVBOptimize {
 	private:
 		double * alpha; // prior over expression
 		size_t T,M,N;
+		size_t totalReads;
 		double * phiHat;
 		double * digA_pH;
 		double * phi_sm;
@@ -52,6 +53,7 @@ class NGVBOptimize {
 		void unpack(double* vals,double* adds);
 		void softmaxInplace(double* val,double* res);
 		void sumCols(double* val, double* res) const;
+		void sumColsWeighed(double* val, double* res) const;
 		double logSumExpVal(double* val, size_t st, size_t en) const;
 
 		void optimizationStep();
