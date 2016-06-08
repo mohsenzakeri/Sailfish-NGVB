@@ -1,4 +1,4 @@
-#include "NGVBOptimize.hpp"
+#include "VBNGOptimize.hpp"
 #include <vector>
 
 
@@ -10,10 +10,92 @@
 #define SWAPD(x,y) {tmpD=x;x=y;y=tmpD;}
 #define ZERO_LIMIT 1e-12
 
-NGVBOptimize::NGVBOptimize(int transcript_size) {
+VBNGOptimize::VBNGOptimize(int transcript_size) {
 	M = transcript_size;
 }
-NGVBOptimize::NGVBOptimize(std::vector<Transcript>& transcripts,
+
+VBNGOptimize::VBNGOptimize(std::vector<Transcript>& transcripts,
+			std::vector<std::vector<uint32_t> >& _txpGroupLabels,
+			std::vector<std::vector<double> >& _txpGroupWeights,
+			std::vector<uint64_t>& _txpGroupCounts,
+			Eigen::VectorXd effLens,
+			int seed) {
+	converged = false;
+	error = false;
+	iteration = 0;
+
+	M = transcripts.size();
+	N = _txpGroupLabels.size();
+	totalReads = 0;
+
+//	txpGroupLabels = _txpGroupLabels;
+//	txpGroupWeights = _txpGroupWeights;
+//	txpGroupCounts = _txpGroupCounts;
+
+	for(size_t i=0; i<N; i++){
+		txpGroupLabels.push_back(_txpGroupLabels[i]);
+		txpGroupWeights.push_back(_txpGroupWeights[i]);
+		txpGroupCounts.push_back(_txpGroupCounts[i]);
+		totalReads += _txpGroupCounts[i];
+	}
+
+ 	digA_pH =  new double[M];
+	phiHat = new double[M];
+	alpha = new double[M];
+	
+	for(size_t i=0;i<M;i++) 
+		alpha[i]= 1;//_alphas[i];
+
+	T = 0;
+	rowStart =  new size_t[N+1];
+	rowStart[0] = 0;
+	for(size_t eqID=0;eqID<N;eqID++) {		
+		size_t groupSize = txpGroupLabels[eqID].size();
+		T += groupSize; 		
+		
+		rowStart[eqID+1] = rowStart[eqID]+groupSize;
+		const std::vector<double> auxs = txpGroupWeights[eqID];
+		const std::vector<uint32_t> txps = txpGroupLabels[eqID];
+		for(size_t i=0;i<groupSize;i++) {
+			beta.push_back(log(auxs[i]));
+			beta_col.push_back(txps[i]);	
+			classID.push_back(eqID);
+		}
+	}
+
+	boost::random::mt11213b rng_mt;
+	rng_mt.seed(seed);
+	boost::random::normal_distribution<long double> normalD;
+	phi_sm = new double[T];
+	phi = new double[T];
+	for(size_t i=0;i<T;i++) 
+		phi_sm[i] = normalD(rng_mt);	
+	unpack(phi_sm,NULL); 
+ 
+
+	double alphaS=0,gAlphaS=0;
+	for(size_t i=0;i<M;i++){
+		alphaS+=alpha[i];
+		gAlphaS+=lgamma(alpha[i]);
+	}
+	boundConstant = lgamma(alphaS) - gAlphaS - lgamma(alphaS+totalReads);
+
+
+	tmpD = NULL;
+	gradPhi = new double[T];
+	phiOld = NULL;
+	natGrad = new double[T];
+	gradGamma = new double[T];
+	searchDir = new double[T];
+	boundOld=getBound();
+	squareNormOld=1;
+	valBeta=0;
+}
+
+
+
+
+VBNGOptimize::VBNGOptimize(std::vector<Transcript>& transcripts,
 			std::vector<std::pair<const TranscriptGroup, TGValue> >& eqVec,
 			Eigen::VectorXd effLens,
 			std::vector<tbb::atomic<double> > _alphas,
@@ -46,17 +128,7 @@ NGVBOptimize::NGVBOptimize(std::vector<Transcript>& transcripts,
             totalReads += count;
         }
     }
-/*    std::cout<<M<<"\n";
-    std::cout<<txpGroupLabels.size()<<"\n";
-    for(int i=0;i<txpGroupLabels.size(); i++){
-    	for(int j=0;j<txpGroupLabels[i].size();j++){
-    		std::cout<<i<<" "<<j<<" "<<txpGroupLabels[i][j]<<" "<<txpGroupWeights[i][j]<<"\n";
-    	}
-    	std::cout<<"txpGroupCounts "<<txpGroupCounts[i]<<"\n";
-    }
-    std::cout<<txpGroupWeights.size()<<"\n";
-    std::cout<<txpGroupCounts.size()<<"\n";
-*/
+
  	digA_pH =  new double[M];
 	phiHat = new double[M];
 	alpha = new double[M];
@@ -65,13 +137,13 @@ NGVBOptimize::NGVBOptimize(std::vector<Transcript>& transcripts,
 		alpha[i]= 1;//_alphas[i];
 
 	T = 0;
-	rowStart =  new size_t[N];
+	rowStart =  new size_t[N+1];
 	rowStart[0] = 0;
 	for(size_t eqID=0;eqID<N;eqID++) {		
 		size_t groupSize = txpGroupLabels[eqID].size();
 		T += groupSize; 		
-		if(eqID<N-1)
-			rowStart[eqID+1] = rowStart[eqID]+groupSize;
+		
+		rowStart[eqID+1] = rowStart[eqID]+groupSize;
 		const std::vector<double> auxs = txpGroupWeights[eqID];
 		const std::vector<uint32_t> txps = txpGroupLabels[eqID];
 		for(size_t i=0;i<groupSize;i++) {
@@ -96,10 +168,10 @@ NGVBOptimize::NGVBOptimize(std::vector<Transcript>& transcripts,
 		alphaS+=alpha[i];
 		gAlphaS+=lgamma(alpha[i]);
 	}
-	boundConstant = lgamma(alphaS) - gAlphaS - lgamma(alphaS+totalReads);//N); //DaNGERRR
+	boundConstant = lgamma(alphaS) - gAlphaS - lgamma(alphaS+totalReads);
 
 
-	gradPhi=natGrad=gradGamma=searchDir=tmpD=phiOld=NULL;
+	tmpD = NULL;
 	gradPhi = new double[T];
 	phiOld = NULL;
 	natGrad = new double[T];
@@ -112,7 +184,7 @@ NGVBOptimize::NGVBOptimize(std::vector<Transcript>& transcripts,
 
 
 
-void NGVBOptimize::negGradient(double res[]){
+void VBNGOptimize::negGradient(double res[]){
    size_t i;
    for(i=0;i<M;i++){
    		//std::cout << alpha[i]+phiHat[i] << " alpha[i]+phiHat[i] \n";
@@ -122,7 +194,7 @@ void NGVBOptimize::negGradient(double res[]){
 	for(i=0;i<T;i++)res[i]= -(beta[i] - phi_sm[i] - 1.0 + digA_pH[beta_col[i]]);//*txpGroupCounts[classID[i]];
 }
 
-double NGVBOptimize::getBound(){
+double VBNGOptimize::getBound(){
    // the lower bound on the model likelihood
    double A=0,B=0,C=0;
    size_t i;
@@ -142,7 +214,7 @@ double NGVBOptimize::getBound(){
 
 
 
-double NGVBOptimize::logSumExpVal(double* val, size_t st, size_t en) const{
+double VBNGOptimize::logSumExpVal(double* val, size_t st, size_t en) const{
 	if(st<0)st = 0;
 	if((en == -1) || (en > T)) en = T;
 	if(st >= en) return 0;
@@ -154,14 +226,14 @@ double NGVBOptimize::logSumExpVal(double* val, size_t st, size_t en) const{
 	 	sumE += exp(val[i] - m);
 	return  m + log(sumE);
 }
-void NGVBOptimize::sumCols(double* val, double* res) const{
+void VBNGOptimize::sumCols(double* val, double* res) const{
 	memset(res,0,M*sizeof(double));
 	for(size_t i=0;i<T;i++) {
 		res[beta_col[i]] += val[i];//*txpGroupCounts[classID[i]]; 
 	}
 }
 
-void NGVBOptimize::sumColsWeighed(double* val, double* res) const{
+void VBNGOptimize::sumColsWeighed(double* val, double* res) const{
 	memset(res,0,M*sizeof(double));
 	for(size_t i=0;i<T;i++) {
 		res[beta_col[i]] += val[i]*txpGroupCounts[classID[i]]; 
@@ -169,7 +241,7 @@ void NGVBOptimize::sumColsWeighed(double* val, double* res) const{
 }
 
 
-void NGVBOptimize::softmaxInplace(double* val,double* res) {
+void VBNGOptimize::softmaxInplace(double* val,double* res) {
 	double logRowSum = 0;
 	long i,r;
 //	memset(res,0,T*sizeof(double));
@@ -184,7 +256,7 @@ void NGVBOptimize::softmaxInplace(double* val,double* res) {
 }
 
 
-void NGVBOptimize::unpack(double* vals,double* adds){
+void VBNGOptimize::unpack(double* vals,double* adds){
    if(adds==NULL){
       if(vals!=phi_sm)
       	memcpy(phi_sm,vals,T*sizeof(double));
@@ -197,7 +269,7 @@ void NGVBOptimize::unpack(double* vals,double* adds){
    sumCols(phi,phiHat); // sumCols of phi into phiHat
 }
 
-void NGVBOptimize::optimizationStep(){
+void VBNGOptimize::optimizationStep(){
 	negGradient(gradPhi);
 	squareNorm=0;
 	valBeta = 0;
@@ -253,17 +325,17 @@ void NGVBOptimize::optimizationStep(){
 		unpack(phiOld, NULL);
 	}
 	SWAPD(gradPhi,phiOld);
-
+	
 }
 
-bool NGVBOptimize::checkConvergance(double ftol, double gtol){
+bool VBNGOptimize::checkConvergance(double ftol, double gtol){
 	if(abs(bound-boundOld)<=ftol){
-		std::cout<<"\nEnd: converged (ftol)\n";
+		std::cout<<"\nEnd: converged (ftol)\n" << bound - boundOld << "\n";
 		converged = true;
 	}
 	//std::cout<<"squareNorm " <<squareNorm<<std::endl;
 	if(squareNorm<=gtol){
-		std::cout<<"\nEnd: converged (gtol)\n";
+		std::cout<<"\nEnd: converged (gtol)\n" << squareNorm << "\n";
 		converged = true;
 	}
 
@@ -271,15 +343,14 @@ bool NGVBOptimize::checkConvergance(double ftol, double gtol){
 	boundOld=bound;	
 	return converged;
 }
-double NGVBOptimize::getConvVal(){
+double VBNGOptimize::getConvVal(){
 	return bound-boundOld;
 }
 
-double* NGVBOptimize::getAlphas(){
+double* VBNGOptimize::getAlphas(){
    double *alphas = new double[M];
    //sumColsWeighed(phi,phiHat);
    for(long i=0;i<M;i++) { alphas[i] = alpha[i] + phiHat[i];}
-   	std::cout<<"sss"<<totalReads<<"\n";
    return alphas;
 }
 

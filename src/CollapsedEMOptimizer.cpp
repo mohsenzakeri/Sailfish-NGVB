@@ -1,6 +1,7 @@
 #include <vector>
 #include <unordered_map>
 #include <atomic>
+#include <ctime>
 
 #include "tbb/task_scheduler_init.h"
 #include "tbb/parallel_for.h"
@@ -25,8 +26,7 @@
 #include "ReadExperiment.hpp"
 #include "BootstrapWriter.hpp"
 #include "MultinomialSampler.hpp"
-#include "NGVBOptimize.hpp"
-//#include "dumm.hpp"
+#include "VBNGOptimize.hpp"
 
 using BlockedIndexRange =  tbb::blocked_range<size_t>;
 
@@ -147,16 +147,16 @@ void EMUpdate_(
  */
 template <typename VecT>
 void VBEMUpdate_(
-    std::vector<std::vector<uint32_t>>& txpGroupLabels,
-    std::vector<std::vector<double>>& txpGroupWeights,
-    std::vector<uint64_t>& txpGroupCounts,
-    std::vector<Transcript>& transcripts,
-    Eigen::VectorXd& effLens,
+	std::vector<std::vector<uint32_t>>& txpGroupLabels,
+	std::vector<std::vector<double>>& txpGroupWeights,
+	std::vector<uint64_t>& txpGroupCounts,
+	std::vector<Transcript>& transcripts,
+	Eigen::VectorXd& effLens,
         double priorAlpha,
         double totLen,
         const VecT& alphaIn,
         VecT& alphaOut,
-    VecT& expTheta) {
+	VecT& expTheta) {
 
     assert(alphaIn.size() == alphaOut.size());
 
@@ -171,50 +171,50 @@ void VBEMUpdate_(
     double priorNorm = prior * totLen;
 
     for (size_t i = 0; i < transcripts.size(); ++i) {
-    if (alphaIn[i] > ::minWeight) {
-        expTheta[i] = std::exp(boost::math::digamma(alphaIn[i]) - logNorm);
-    } else {
-        expTheta[i] = 0.0;
-    }
-    alphaOut[i] = prior;
+	if (alphaIn[i] > ::minWeight) {
+	    expTheta[i] = std::exp(boost::math::digamma(alphaIn[i]) - logNorm);
+	} else {
+	    expTheta[i] = 0.0;
+	}
+	alphaOut[i] = prior;
     }
 
     for (size_t eqID = 0; eqID < numEQClasses; ++eqID) {
-    uint64_t count = txpGroupCounts[eqID];
-    const std::vector<uint32_t>& txps = txpGroupLabels[eqID];
-    const std::vector<double>& auxs = txpGroupWeights[eqID];
+	uint64_t count = txpGroupCounts[eqID];
+	const std::vector<uint32_t>& txps = txpGroupLabels[eqID];
+	const std::vector<double>& auxs = txpGroupWeights[eqID];
 
-    double denom = 0.0;
-    size_t groupSize = txps.size();
-    // If this is a single-transcript group,
-    // then it gets the full count.  Otherwise,
-    // update according to our VBEM rule.
-    if (BOOST_LIKELY(groupSize > 1)) {
-        for (size_t i = 0; i < groupSize; ++i) {
-        auto tid = txps[i];
-        auto aux = auxs[i];
-        if (expTheta[tid] > 0.0) {
-            double v = expTheta[tid] * aux;
-            denom += v;
-        }
-        }
-        if (denom <= ::minEQClassWeight) {
-        // tgroup.setValid(false);
-        } else {
-        double invDenom = count / denom;
-        for (size_t i = 0; i < groupSize; ++i) {
-            auto tid = txps[i];
-            auto aux = auxs[i];
-            if (expTheta[tid] > 0.0) {
-            double v = expTheta[tid] * aux;
-            incLoop(alphaOut[tid], v * invDenom);
-            }
-        }
-        }
+	double denom = 0.0;
+	size_t groupSize = txps.size();
+	// If this is a single-transcript group,
+	// then it gets the full count.  Otherwise,
+	// update according to our VBEM rule.
+	if (BOOST_LIKELY(groupSize > 1)) {
+	    for (size_t i = 0; i < groupSize; ++i) {
+		auto tid = txps[i];
+		auto aux = auxs[i];
+		if (expTheta[tid] > 0.0) {
+		    double v = expTheta[tid] * aux;
+		    denom += v;
+		}
+	    }
+	    if (denom <= ::minEQClassWeight) {
+		// tgroup.setValid(false);
+	    } else {
+		double invDenom = count / denom;
+		for (size_t i = 0; i < groupSize; ++i) {
+		    auto tid = txps[i];
+		    auto aux = auxs[i];
+		    if (expTheta[tid] > 0.0) {
+			double v = expTheta[tid] * aux;
+			incLoop(alphaOut[tid], v * invDenom);
+		    }
+		}
+	    }
 
-    } else {
-        incLoop(alphaOut[txps.front()], count);
-    }
+	} else {
+	    incLoop(alphaOut[txps.front()], count);
+	}
     }
 }
 
@@ -295,7 +295,7 @@ void VBEMUpdate_(
         double totLen,
         const CollapsedEMOptimizer::VecType& alphaIn,
         CollapsedEMOptimizer::VecType& alphaOut,
-        CollapsedEMOptimizer::VecType& expTheta) {
+	    CollapsedEMOptimizer::VecType& expTheta) {
 
     assert(alphaIn.size() == alphaOut.size());
 
@@ -438,8 +438,8 @@ size_t markDegenerateClasses(
 CollapsedEMOptimizer::CollapsedEMOptimizer() {}
 
 bool doBootstrap(
-        std::vector<std::vector<uint32_t> >& txpGroups,
-        std::vector<std::vector<double> >& txpGroupWeights,
+        std::vector<std::vector<uint32_t>>& txpGroups,
+        std::vector<std::vector<double>>& txpGroupWeights,
         std::vector<Transcript>& transcripts,
         Eigen::VectorXd& effLens,
         std::vector<double>& sampleWeights,
@@ -454,11 +454,12 @@ bool doBootstrap(
 
     auto& jointLog = sopt.jointLog;
     bool useVBEM{sopt.useVBOpt};
+    bool useVBNG{sopt.useVBNGOpt};
     size_t numClasses = txpGroups.size();
     CollapsedEMOptimizer::SerialVecType alphas(transcripts.size(), 0.0);
     CollapsedEMOptimizer::SerialVecType alphasPrime(transcripts.size(), 0.0);
     CollapsedEMOptimizer::SerialVecType expTheta(transcripts.size(), 0.0);
-    std::vector<uint64_t> sampCounts(numClasses, 0);
+    std::vector<uint64_t>sampCounts(numClasses, 0);
 
     uint32_t numBootstraps = sopt.numBootstraps;
 
@@ -484,11 +485,15 @@ bool doBootstrap(
         double minAlpha = 1e-8;
         double alphaCheckCutoff = 1e-2;
         double cutoff = (useVBEM) ? (priorAlpha + minAlpha) : minAlpha;
-        
-//        incLoop(priorAlpha, 2);
-        int t_size = (int)transcripts.size();
+ 	VBNGOptimize* vbng = new VBNGOptimize(transcripts,txpGroups,txpGroupWeights,sampCounts,effLens,1);
         while (itNum < maxIter and !converged) {
-            if (useVBEM) {
+	    if (useVBNG) {
+		std::cout<<"iteration" <<itNum<< "\n";
+	    	vbng->optimizationStep();
+	    	converged = vbng->checkConvergance(0.000001,0.000001);    		
+	    }
+            else {
+	    if (useVBEM) {
                 VBEMUpdate_(txpGroups, txpGroupWeights, sampCounts, transcripts,
                         effLens, priorAlpha, totalLen, alphas, alphasPrime, expTheta);
             } else {
@@ -509,9 +514,15 @@ bool doBootstrap(
                 alphas[i] = alphasPrime[i];
                 alphasPrime[i] = 0.0;
             }
+	    }
             ++itNum;
         }
-
+    	if(useVBNG) {
+		double* _alphas = vbng->getAlphas();
+        	for (size_t i=0; i<transcripts.size(); i++) 
+	 	 alphas[i] = _alphas[i];
+    	}
+ 
         // Truncate tiny expression values
         double alphaSum = truncateCountVector(alphas, cutoff);
 
@@ -520,7 +531,7 @@ bool doBootstrap(
                     "Make sure you ran sailfish correctly.");
             return false;
         }
-
+	
         writeBootstrap(alphas);//bootstrapWriter->writeBootstrap(alphas);
     }
     return true;
@@ -595,6 +606,7 @@ bool CollapsedEMOptimizer::gatherBootstraps(
     }
 
     bool useVBEM{sopt.useVBOpt};
+    bool useVBNG{sopt.useVBNGOpt};
     // If we use VBEM, we'll need the prior parameters
     double priorAlpha = 0.01;
 
@@ -724,8 +736,6 @@ bool CollapsedEMOptimizer::optimize(ReadExperiment& readExp,
     tbb::task_scheduler_init tbbScheduler(sopt.numThreads);
     std::vector<Transcript>& transcripts = readExp.transcripts();
 
-
-
     using VecT = CollapsedEMOptimizer::VecType;
     // With atomics
     VecType alphas(transcripts.size(), 0.0);
@@ -763,7 +773,6 @@ bool CollapsedEMOptimizer::optimize(ReadExperiment& readExp,
                     // 1 / effLen of the corresponding transcript
                     double wsum{0.0};
                     for (size_t i = 0; i < classSize; ++i) {
-                        //kv.second.count = 1;
                         v.weights[i] = (kv.second.count / effLens(k.txps[i]));
                         wsum += v.weights[i];
                     }
@@ -786,8 +795,8 @@ bool CollapsedEMOptimizer::optimize(ReadExperiment& readExp,
         }
     }
 
+    bool useVBNG(sopt.useVBNGOpt);
     bool useVBEM{sopt.useVBOpt};
-    bool useNGVB{sopt.useNGVBOpt};
     // If we use VBEM, we'll need the prior parameters
     double priorAlpha = 0.01;
 
@@ -823,16 +832,21 @@ bool CollapsedEMOptimizer::optimize(ReadExperiment& readExp,
 
     bool converged{false};
     double maxRelDiff = -std::numeric_limits<double>::max();
-    NGVBOptimize* ngvb = new NGVBOptimize(transcripts,eqVec,effLens,alphas,1);
+    VBNGOptimize* vbng = new VBNGOptimize(transcripts,eqVec,effLens,alphas,1);
+    std::vector<double> periods;
     while (itNum < minIter or (itNum < maxIter and !converged)) {
-
+	clock_t start = clock();
         // Recompute the effective lengths to account for sequence-specific
         // bias.  Consider a better metric here.
         if (doBiasCorrect and
              (find(recomputeIt.begin(), recomputeIt.end(), itNum) != recomputeIt.end())) {
 
             jointLog->info("iteration {}, recomputing effective lengths", itNum);
-            effLens = sailfish::utils::updateEffectiveLengths(sopt,readExp,effLens,alphas);
+            effLens = sailfish::utils::updateEffectiveLengths(
+	  		sopt,
+                        readExp,
+                        effLens,
+                        alphas);
             // Check for strangeness with the lengths.
             for (size_t i = 0; i < effLens.size(); ++i) {
                 if (effLens(i) <= 0.0) {
@@ -841,49 +855,56 @@ bool CollapsedEMOptimizer::optimize(ReadExperiment& readExp,
             }
             updateEqClassWeights(eqVec, effLens);
         }
-        if (useNGVB) {
-                ngvb->optimizationStep();
-                converged = ngvb->checkConvergance(0.00001,0.00001); //ftol and gtol
-                //ngvb->getAlphas();
+        if (useVBNG) {
+	    std::cout<<"iteration" <<itNum<< "\n";
+	    vbng->optimizationStep();
+	    converged = vbng->checkConvergance(0.000001,0.000001);    	
+	}
+	else {
+        if (useVBEM) {
+            VBEMUpdate_(eqVec, transcripts, effLens,
+                        priorAlpha, totalLen, alphas, alphasPrime, expTheta);
+        } else {
+            EMUpdate_(eqVec, transcripts, effLens, alphas, alphasPrime);
         }
-        else {
-            if (useVBEM) {
-                VBEMUpdate_(eqVec, transcripts, effLens,
-                            priorAlpha, totalLen, alphas, alphasPrime, expTheta);
-            } else {
-                EMUpdate_(eqVec, transcripts, effLens, alphas, alphasPrime);
-            }
 
-            converged = true;
-            maxRelDiff = -std::numeric_limits<double>::max();
-            for (size_t i = 0; i < transcripts.size(); ++i) {
-                if (alphasPrime[i] > alphaCheckCutoff) {
-                    double relDiff = std::fabs(alphas[i] - alphasPrime[i]) / alphasPrime[i];
-                    maxRelDiff = (relDiff > maxRelDiff) ? relDiff : maxRelDiff;
-                    if (relDiff > relDiffTolerance) {
-                        converged = false;
-                    }
+        converged = true;
+        maxRelDiff = -std::numeric_limits<double>::max();
+        for (size_t i = 0; i < transcripts.size(); ++i) {
+            if (alphasPrime[i] > alphaCheckCutoff) {
+                double relDiff = std::fabs(alphas[i] - alphasPrime[i]) / alphasPrime[i];
+                maxRelDiff = (relDiff > maxRelDiff) ? relDiff : maxRelDiff;
+                if (relDiff > relDiffTolerance) {
+                    converged = false;
                 }
-                alphas[i] = alphasPrime[i];
-                alphasPrime[i] = 0.0;
             }
+            alphas[i] = alphasPrime[i];
+            alphasPrime[i] = 0.0;
         }
+	}
 
         if (itNum % 100 == 0) {
             jointLog->info("iteration = {} | max rel diff. = {}",
                             itNum, maxRelDiff);
         }
-        std::cout<<"itNum "<<itNum<<"\n";
+	clock_t ends = clock();
+	periods.push_back((double)ends-start);
         ++itNum;
     }
-
+    
     jointLog->info("iteration = {} | max rel diff. = {}",
                     itNum, maxRelDiff);
-    if (useNGVB) {
-        double* _alphas = ngvb->getAlphas();
-        for (int i=0; i<alphas.size(); i++) {
-            alphas[i] = _alphas[i];
-        }
+    double sum = 0;
+    for(int i=0; i<periods.size(); ++i) sum += periods[i];
+    std::cout<<"iteration time: "<< sum/periods.size()<<"\n";
+    std::cout<<"iteration time: "<< sum<<"\n";
+    std::cout<<"iteration time: "<< (double) periods[45]<<"\n";
+    
+
+    if(useVBNG) {
+	double* _alphas = vbng->getAlphas();
+        for (size_t i=0; i<transcripts.size(); i++) 
+	    alphas[i] = _alphas[i];
     }
     // Truncate tiny expression values
     double alphaSum = truncateCountVector(alphas, cutoff);

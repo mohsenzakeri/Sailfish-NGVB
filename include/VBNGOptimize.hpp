@@ -1,12 +1,21 @@
+#ifndef __VBNGOptimize_HPP__
+#define __VBNGOptimize_HPP__
 
 #include <boost/math/special_functions/digamma.hpp>
 #include <vector>
-	
+#include <cstdint>
+#include "Transcript.hpp"
+#include "TranscriptGroup.hpp"
+#include "EquivalenceClassBuilder.hpp"
+#include "Eigen/Dense"
 
-class NGVBMethod {
+//#include <stdint.h>	
+
+class VBNGOptimize {
 	private:
-		size_t T,M,N;
 		double * alpha; // prior over expression
+		size_t T,M,N;
+		size_t totalReads;
 		double * phiHat;
 		double * digA_pH;
 		double * phi_sm;
@@ -31,22 +40,28 @@ class NGVBMethod {
 		double boundOld,bound,squareNorm,squareNormOld,valBeta,valBetaDiv,natGrad_i,gradGamma_i,phiGradPhiSum_r;
 		double *gradPhi,*natGrad,*gradGamma,*searchDir,*tmpD,*phiOld;
 
-
 	public:
-		NGVBMethod(std::vector<uint32_t>& _transcripts,
-					std::vector<std::vector<uint32_t> >& _txpGroupLabels,
-					std::vector<std::vector<double> >& _txpGroupWeights,
-					std::vector<uint64_t>& _txpGroupCounts,
-					long seed = 0);
+		VBNGOptimize(int transcript_size);
+		VBNGOptimize(std::vector<Transcript>& transcripts,
+			std::vector<std::vector<uint32_t> >& _txpGroupLabels,
+			std::vector<std::vector<double> >& _txpGroupWeights,
+			std::vector<uint64_t>& _txpGroupCounts,
+			Eigen::VectorXd effLens,
+			int seed);
+		VBNGOptimize(std::vector<Transcript>& transcripts,
+					std::vector<std::pair<const TranscriptGroup, TGValue> >& eqVec,
+					Eigen::VectorXd effLens,
+					std::vector<tbb::atomic<double> > _alphas,
+					int seed);
 		
 		void negGradient(double* res);
 		double getBound();
 		void unpack(double* vals,double* adds);
 		void softmaxInplace(double* val,double* res);
 		void sumCols(double* val, double* res) const;
+		void sumColsWeighed(double* val, double* res) const;
 		double logSumExpVal(double* val, size_t st, size_t en) const;
 
-		void optimize(long maxIter,double ftol, double gtol);
 		void optimizationStep();
 		bool checkConvergance(double ftol, double gtol);
 		double* getAlphas();
@@ -54,13 +69,6 @@ class NGVBMethod {
 		double getConvVal();
 
 
-/*		void EMStep(
-	        std::vector<std::vector<uint32_t> >& txpGroupLabels,
-	        std::vector<std::vector<double> >& txpGroupWeights,
-	        std::vector<uint64_t>& txpGroupCounts,
-	        std::vector<double>& alphaIn,
-	        std::vector<double>& alphaOut);
-
-		void incLoop(std::vector<double>& val, double inc);
-*/
 };
+
+#endif
